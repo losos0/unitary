@@ -789,14 +789,10 @@ class CirqBoard:
                 epqubit not in self.entangled_squares
                 and squbit not in self.entangled_squares
                 and tqubit not in self.entangled_squares
+                and nth_bit_of(epbit, self.state)
+                and nth_bit_of(sbit, self.state)
+                and not nth_bit_of(tbit, self.state)
             ):
-                if (
-                    not nth_bit_of(epbit, self.state)
-                    or not nth_bit_of(sbit, self.state)
-                    or nth_bit_of(tbit, self.state)
-                ):
-                    raise ValueError("Invalid classical e.p. move")
-
                 self.state = set_nth_bit(epbit, self.state, False)
                 self.state = set_nth_bit(sbit, self.state, False)
                 self.state = set_nth_bit(tbit, self.state, True)
@@ -844,7 +840,11 @@ class CirqBoard:
             is_there = self.post_select_on(squbit, m.measurement)
             if not is_there:
                 return 0
-            if tqubit in self.entangled_squares:
+            if tqubit not in self.entangled_squares and nth_bit_of(tbit, self.state):
+                # Classical case
+                self.state = set_nth_bit(sbit, self.state, False)
+                self.state = set_nth_bit(tbit, self.state, True)
+            else:
                 old_tqubit = self.unhook(tqubit)
                 self.state = set_nth_bit(tbit, self.state, False)
                 self.add_entangled(squbit, tqubit)
@@ -854,10 +854,6 @@ class CirqBoard:
                         cirq.ISWAP, [squbit, tqubit], [old_tqubit], []
                     )
                 )
-            else:
-                # Classical case
-                self.state = set_nth_bit(sbit, self.state, False)
-                self.state = set_nth_bit(tbit, self.state, True)
             return 1
 
         if m.move_type == enums.MoveType.SPLIT_SLIDE:
@@ -1092,7 +1088,7 @@ class CirqBoard:
                     qubit_to_bit(p), self.state
                 ):
                     # Classical piece in the way
-                    return 0
+                    return 1
 
             # For excluded case, measure target
             if m.move_variant == enums.MoveVariant.EXCLUDED:
@@ -1173,6 +1169,7 @@ class CirqBoard:
         ):
             if (
                 squbit not in self.entangled_squares
+                and nth_bit_of(sbit, self.state)
                 and tqubit not in self.entangled_squares
             ):
                 # Classical version
@@ -1195,9 +1192,10 @@ class CirqBoard:
                 if is_there:
                     return 0
 
-            # Only convert source qubit to ancilla if target
-            # is empty
-            unhook = tqubit not in self.entangled_squares
+            # Only convert source qubit to ancilla if target is empty
+            unhook = tqubit not in self.entangled_squares and not nth_bit_of(
+                tbit, self.state
+            )
             self.add_entangled(squbit, tqubit)
 
             # Execute jump
