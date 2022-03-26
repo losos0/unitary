@@ -1282,7 +1282,6 @@ class CirqBoard:
                     self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
                     return 1
                 else:
-                    self.post_selection[castle_ancilla] = castle_allowed
                     return 0
 
             # One intervening square in superposition
