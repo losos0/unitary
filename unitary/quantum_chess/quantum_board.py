@@ -690,6 +690,54 @@ class CirqBoard:
             qm.queenside_castle(squbit, rook_squbit, tqubit, rook_tqubit, b_qubit)
         )
 
+    def _do_noncontrolled_castle(self, variant, measurement, sbit, tbit, rook_sbit, rook_tbit):
+        """Kingside castle or queenside castle with empty b-file."""
+        squbit = bit_to_qubit(sbit)
+        tqubit = bit_to_qubit(tbit)
+        rook_squbit = bit_to_qubit(rook_sbit)
+        rook_tqubit = bit_to_qubit(rook_tbit)
+        f_empty = rook_tqubit not in self.entangled_squares and not nth_bit_of(
+            rook_tbit, self.state
+        )
+
+        if variant == enums.MoveVariant.BASIC:
+            # Not in superposition, just castle
+            if f_empty:
+                self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
+                return 1
+
+            self.state = set_nth_bit(sbit, self.state, False)
+            self.state = set_nth_bit(tbit, self.state, True)
+            self.add_entangled(rook_squbit, rook_tqubit)
+            self.circuit.append(qm.normal_move(rook_squbit, rook_tqubit))
+            return 1
+
+        elif variant == enums.MoveVariant.EXCLUDED:
+            g_empty = tqubit not in self.entangled_squares and not nth_bit_of(
+                tbit, self.state
+            )
+            # Both intervening squares in superposition
+            if not f_empty and not g_empty:
+                castle_ancilla = self._create_path_ancilla([rook_tqubit, tqubit])
+                self.entangled_squares.add(castle_ancilla)
+                castle_allowed = self.post_select_on(castle_ancilla, measurement)
+            else:
+                # One intervening square in superposition
+                if g_empty:
+                    measure_qubit = rook_tqubit
+                else:
+                    measure_qubit = tqubit
+                # Note that a measurement of 1 means that the move was
+                # successful so that the target square is empty
+                castle_allowed = not self.post_select_on(
+                    measure_qubit, measurement, invert=True
+                )
+
+            if not castle_allowed:
+                return 0
+            self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
+            return 1
+
     def post_select_on(
         self,
         qubit: cirq.Qid,
@@ -1258,52 +1306,10 @@ class CirqBoard:
                 rook_tbit = square_to_bit("f8")
             else:
                 raise ValueError(f"Invalid kingside castling move")
-            rook_squbit = bit_to_qubit(rook_sbit)
-            rook_tqubit = bit_to_qubit(rook_tbit)
-            f_empty = rook_tqubit not in self.entangled_squares and not nth_bit_of(
-                rook_tbit, self.state
-            )
 
-            if m.move_variant == enums.MoveVariant.BASIC:
-                # Not in superposition, just castle
-                if f_empty:
-                    self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
-                    return 1
-
-                self.state = set_nth_bit(sbit, self.state, False)
-                self.state = set_nth_bit(tbit, self.state, True)
-                self.add_entangled(rook_squbit, rook_tqubit)
-                self.circuit.append(qm.normal_move(rook_squbit, rook_tqubit))
-                return 1
-
-            elif m.move_variant == enums.MoveVariant.EXCLUDED:
-                g_empty = tqubit not in self.entangled_squares and not nth_bit_of(
-                    tbit, self.state
-                )
-                # Both intervening squares in superposition
-                if not f_empty and not g_empty:
-                    castle_ancilla = self._create_path_ancilla([rook_tqubit, tqubit])
-                    self.entangled_squares.add(castle_ancilla)
-                    castle_allowed = self.post_select_on(castle_ancilla, m.measurement)
-                else:
-                    # One intervening square in superposition
-                    if g_empty:
-                        measure_qubit = rook_tqubit
-                    else:
-                        measure_qubit = tqubit
-                    # Note that a measurement of 1 means that the move was
-                    # successful so that the target square is empty
-                    castle_allowed = not self.post_select_on(
-                        measure_qubit, m.measurement, invert=True
-                    )
-
-                if not castle_allowed:
-                    return 0
-                self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
-                return 1
+            return self._do_noncontrolled_castle(m.move_variant, m.measurement, sbit, tbit, rook_sbit, rook_tbit)
 
         if m.move_type == enums.MoveType.QS_CASTLE:
-
             # Figure out the rook squares and the b-file square involved
             if sbit == square_to_bit("e1") and tbit == square_to_bit("c1"):
                 rook_sbit = square_to_bit("a1")
@@ -1315,84 +1321,51 @@ class CirqBoard:
                 b_bit = square_to_bit("b8")
             else:
                 raise ValueError(f"Invalid queenside castling move")
+
+            b_qubit = bit_to_qubit(b_bit)
+            if b_qubit not in self.entangled_squares and not nth_bit_of(b_bit, self.state):
+                return self._do_noncontrolled_castle(m.move_variant, m.measurement, sbit, tbit, rook_sbit, rook_tbit)
+
             rook_squbit = bit_to_qubit(rook_sbit)
             rook_tqubit = bit_to_qubit(rook_tbit)
-            b_qubit = bit_to_qubit(b_bit)
-
-            # Piece in non-superposition in the way, not legal
-            if (
-                nth_bit_of(rook_tbit, self.state)
-                and rook_tqubit not in self.entangled_squares
-            ):
-                return 0
-            if nth_bit_of(tbit, self.state) and tqubit not in self.entangled_squares:
-                return 0
-            if (
-                b_bit is not None
-                and nth_bit_of(b_bit, self.state)
-                and b_qubit not in self.entangled_squares
-            ):
-                return 0
-
-            # Not in superposition, just castle
-            if (
-                rook_tqubit not in self.entangled_squares
-                and tqubit not in self.entangled_squares
-                and b_qubit not in self.entangled_squares
-            ):
-                self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
+            
+            if m.move_variant == enums.MoveVariant.BASIC:
+                self.add_entangled(squbit, tqubit, rook_squbit, rook_tqubit, b_qubit)
+                self.circuit.append(
+                    qm.queenside_castle(squbit, rook_squbit, tqubit, rook_tqubit, b_qubit)
+                )
                 return 1
 
-            # Neither intervening squares in superposition
-            if (
-                rook_tqubit not in self.entangled_squares
-                and tqubit not in self.entangled_squares
-            ):
-                if b_qubit not in self.entangled_squares:
-                    self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
+            if m.move_variant == enums.MoveVariant.EXCLUDED:
+                c_empty = tqubit not in self.entangled_squares and not nth_bit_of(tbit, self.state)
+                d_empty = rook_tqubit not in self.entangled_squares and not nth_bit_of(rook_tbit, self.state)
+
+                # Both intervening squares in superposition
+                if not c_empty and not d_empty:
+                    castle_ancilla = self._create_path_ancilla([rook_tqubit, tqubit])
+                    self.entangled_squares.add(castle_ancilla)
+                    castle_allowed = self.post_select_on(castle_ancilla, m.measurement)
                 else:
-                    self.queenside_castle(
-                        squbit, rook_squbit, tqubit, rook_tqubit, b_qubit
-                    )
-                return 1
-
-            # Both intervening squares in superposition
-            if (
-                rook_tqubit in self.entangled_squares
-                and tqubit in self.entangled_squares
-            ):
-                castle_ancilla = self._create_path_ancilla([rook_tqubit, tqubit])
-                self.entangled_squares.add(castle_ancilla)
-                castle_allowed = self.post_select_on(castle_ancilla, m.measurement)
-                if castle_allowed:
-                    self.unhook(rook_tqubit)
-                    self.unhook(tqubit)
-                    if b_qubit not in self.entangled_squares:
-                        self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
+                    # One intervening square in superposition
+                    if c_empty:
+                        measure_qubit = rook_tqubit
                     else:
-                        self.queenside_castle(
-                            squbit, rook_squbit, tqubit, rook_tqubit, b_qubit
-                        )
-                    return 1
-                else:
-                    self.post_selection[castle_ancilla] = castle_allowed
-                    return 0
+                        measure_qubit = tqubit
+                    # Note that a measurement of 1 means that the move was
+                    # successful so that the target square is empty
+                    castle_allowed = not self.post_select_on(
+                        measure_qubit, m.measurement, invert=True
+                    )
 
-            # One intervening square in superposition
-            if rook_tqubit in self.entangled_squares:
-                measure_qubit = rook_tqubit
-            else:
-                measure_qubit = tqubit
-            # Note that a measurement of one means the move was successful
-            # so that the path was clear
-            is_there = self.post_select_on(measure_qubit, m.measurement, invert=True)
-            if is_there:
-                return 0
-            if b_qubit not in self.entangled_squares:
-                self.set_castle(sbit, rook_sbit, tbit, rook_tbit)
-            else:
-                self.queenside_castle(squbit, rook_squbit, tqubit, rook_tqubit, b_qubit)
-            return 1
+                if not castle_allowed:
+                    return 0
+                #self.unhook(tqubit)
+                #self.unhook(rook_tqubit)
+                self.add_entangled(squbit, tqubit, rook_squbit, rook_tqubit, b_qubit)
+                self.circuit.append(
+                    qm.queenside_castle(squbit, rook_squbit, tqubit, rook_tqubit, b_qubit)
+                )
+                return 1
 
         raise ValueError(f"Move type {m.move_type} not supported")
 

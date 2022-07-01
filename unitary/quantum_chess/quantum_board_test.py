@@ -1149,7 +1149,6 @@ def test_pawn_capture_bits(board):
         (u.squares_to_bitboard(["e8", "f8", "h8"]), "e8", "g8"),
         (u.squares_to_bitboard(["e8", "g8", "h8"]), "e8", "g8"),
         (u.squares_to_bitboard(["e8", "f8", "g8", "h8"]), "e8", "g8"),
-        (u.squares_to_bitboard(["e1", "b1", "a1"]), "e1", "c1"),
         (u.squares_to_bitboard(["e1", "c1", "a1"]), "e1", "c1"),
         (u.squares_to_bitboard(["e1", "d1", "a1"]), "e1", "c1"),
         (u.squares_to_bitboard(["e1", "b1", "c1", "d1", "a1"]), "e1", "c1"),
@@ -1335,7 +1334,7 @@ def test_entangled_qs_castle2(board):
         "b3^b2b1:SPLIT_JUMP:BASIC",
         "c3^c2c1:SPLIT_JUMP:BASIC",
         "d3^d2d1:SPLIT_JUMP:BASIC",
-        "e1c1:QS_CASTLE:BASIC",
+        "e1c1:QS_CASTLE:EXCLUDED",
     )
     if did_it_move:
         possibilities = [
